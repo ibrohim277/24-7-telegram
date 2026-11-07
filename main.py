@@ -16,6 +16,7 @@ from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 
 import aiosqlite
+from aiohttp import web
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -561,7 +562,28 @@ async def drop_pending(uid: int) -> None:
 
 
 # ----------------------------------------------------------------------------
+async def start_health_server():
+    """Render kabi hostinglar Web Service uchun port talab qiladi.
+    PORT o'zgaruvchisi bo'lsa, kichik HTTP server ochamiz (UptimeRobot ham shuni ping qiladi)."""
+    port = int(os.environ.get("PORT", "0"))
+    if not port:
+        return None
+
+    async def ok(_request):
+        return web.Response(text="ok")
+
+    app = web.Application()
+    app.router.add_get("/", ok)
+    app.router.add_get("/health", ok)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    await web.TCPSite(runner, "0.0.0.0", port).start()
+    log.info("Health server %s-portda ishga tushdi", port)
+    return runner
+
+
 async def main() -> None:
+    health = await start_health_server()
     await db_init()
     bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher(storage=MemoryStorage())
@@ -579,6 +601,8 @@ async def main() -> None:
         for uid in list(workers):
             await stop_worker(uid)
         await bot.session.close()
+        if health:
+            await health.cleanup()
 
 
 if __name__ == "__main__":
